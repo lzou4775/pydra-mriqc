@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 def dmri_qc_workflow(
     exec_ants_float=False,
-    exec_bids_database_dir=None,
+    exec_bids_database_dir="/Users/lekangzoukang/Data/ds000114/sub-02/ses-test/anat/sub-02-ses-test-T1w.nii.gz ",
     exec_datalad_get=True,
     exec_debug=False,
     exec_dsname="<unset>",
@@ -26,7 +26,7 @@ def dmri_qc_workflow(
     wf_fd_radius=50,
     wf_fd_thres=0.2,
     wf_fft_spikes_detector=False,
-    wf_inputs=None,
+    wf_inputs=None,  # dataset leave it as it is at this moment
     wf_min_len_dwi=7,
     wf_species="human",
     wf_template_id="MNI152NLin2009cAsym",
@@ -44,7 +44,7 @@ def dmri_qc_workflow(
 
     """
     from pydra.tasks.afni.auto import Volreg
-    from pydra.tasks.mrtrix3.auto.preprocess import DWIDenoise
+    from pydra.tasks.mrtrix3.v3_0 import DwiDenoise
     from pydra.tasks.niworkflows.interfaces.header import SanitizeImage
     from pydra.tasks.niworkflows.interfaces.images import RobustAverage
     from pydra.tasks.mriqc.interfaces.diffusion import (
@@ -66,33 +66,38 @@ def dmri_qc_workflow(
 
     workflow = Workflow(name=name, input_spec=["in_file"])
 
-    dataset = wf_inputs.get("dwi", [])
-    full_data = []
-    for dwi_path in dataset:
-        bval = exec_layout.get_bval(dwi_path)
-        if bval and Path(bval).exists() and len(np.loadtxt(bval)) > wf_min_len_dwi:
-            full_data.append(dwi_path)
-        else:
-            logger.warn(
-                f"Dismissing {dwi_path} for processing. b-values are missing or "
-                "insufficient in number to execute the workflow."
-            )
-    if set(dataset) - set(full_data):
-        wf_inputs["dwi"] = full_data
+    ### Dataset set to run before running with the workflow
 
-    message = "Building {modality} MRIQC workflow {detail}.".format(
-        modality="diffusion",
-        detail=(
-            f"for {len(full_data)} NIfTI files."
-            if len(full_data) > 2
-            else f"({' and '.join('<%s>' % v for v in full_data)})."
-        ),
-    )
-    logger.info(message)
-    if exec_datalad_get:
-        from pydra.tasks.mriqc.utils.misc import _datalad_get
+    # dataset = wf_inputs.get("dwi", [])
+    # full_data = []
+    # for dwi_path in dataset:
+    #     bval = exec_layout.get_bval(dwi_path)
+    #     if bval and Path(bval).exists() and len(np.loadtxt(bval)) > wf_min_len_dwi:
+    #         full_data.append(dwi_path)
+    #     else:
+    #         logger.warn(
+    #             f"Dismissing {dwi_path} for processing. b-values are missing or "
+    #             "insufficient in number to execute the workflow."
+    #         )
+    # if set(dataset) - set(full_data):
+    #     wf_inputs["dwi"] = full_data
 
-        _datalad_get(full_data)
+    ### Full_data not defined because of the previous section comment (*** will use later)
+
+    # message = "Building {modality} MRIQC workflow {detail}.".format(
+    #     modality="diffusion",
+    #     detail=(
+    #         f"for {len(full_data)} NIfTI files."
+    #         if len(full_data) > 2
+    #         else f"({' and '.join('<%s>' % v for v in full_data)})."
+    #     ),
+    # )
+    # logger.info(message)
+    # if exec_datalad_get:
+    #     from pydra.tasks.mriqc.utils.misc import _datalad_get
+
+    #     _datalad_get(full_data)
+
     # Define workflow, inputs and outputs
     # 0. Get data, put it in RAS orientation
 
@@ -544,6 +549,7 @@ def compute_iqms(
         ],
     )
 
+    # niu function needs re-definition
     workflow.add(
         niu.Function(
             function=_estimate_sigma,
