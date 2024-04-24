@@ -1,7 +1,4 @@
-<<<<<<< HEAD
-=======
 import attrs
->>>>>>> auto-conv-updates
 import logging
 from pydra.engine import Workflow
 
@@ -9,21 +6,13 @@ from pydra.engine import Workflow
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
-def synthstrip_wf(name="synthstrip_wf", omp_nthreads=None):
-=======
 def synthstrip_wf(in_files=attrs.NOTHING, name="synthstrip_wf", omp_nthreads=None):
->>>>>>> auto-conv-updates
     """Create a brain-extraction workflow using SynthStrip."""
     from pydra.tasks.ants.auto import N4BiasFieldCorrection
     from pydra.tasks.niworkflows.interfaces.nibabel import ApplyMask, IntensityClip
     from pydra.tasks.mriqc.interfaces.synthstrip import SynthStrip
 
-<<<<<<< HEAD
-    workflow = Workflow(name=name, input_spec=["in_files"])
-=======
     workflow = Workflow(name=name, input_spec=["in_files"], in_files=in_files)
->>>>>>> auto-conv-updates
 
     # truncate target intensity for N4 correction
     workflow.add(
