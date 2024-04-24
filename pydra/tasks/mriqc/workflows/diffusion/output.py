@@ -208,8 +208,8 @@ def init_dwi_report_wf(
 
     # fmt: off
     # fmt: on
-    if True:
-        return workflow
+    # if True:
+    #     return workflow
     # Generate crown mask
     # Create the crown mask
     workflow.add(
