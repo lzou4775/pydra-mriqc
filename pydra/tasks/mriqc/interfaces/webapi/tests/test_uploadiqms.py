@@ -1,0 +1,17 @@
+from fileformats.generic import File
+import logging
+from nipype2pydra.testing import PassAfterTimeoutWorker
+from pydra.tasks.mriqc.interfaces.webapi.upload_iq_ms import UploadIQMs
+import pytest
+
+
+logger = logging.getLogger(__name__)
+
+
+@pytest.mark.xfail
+def test_uploadiqms_1():
+    task = UploadIQMs()
+    task.inputs.in_iqms = File.sample(seed=0)
+    task.inputs.strict = False
+    res = task(plugin=PassAfterTimeoutWorker)
+    print("RESULT: ", res)
