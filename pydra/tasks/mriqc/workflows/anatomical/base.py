@@ -61,20 +61,20 @@ def anat_qc_workflow(
 
     workflow = Workflow(name=name, input_spec=["in_file"])
 
-    dataset = wf_inputs.get("t1w", []) + wf_inputs.get("t2w", [])
-    message = "Building {modality} MRIQC workflow {detail}.".format(
-        modality="anatomical",
-        detail=(
-            f"for {len(dataset)} NIfTI files."
-            if len(dataset) > 2
-            else f"({' and '.join('<%s>' % v for v in dataset)})."
-        ),
-    )
-    logger.info(message)
-    if exec_datalad_get:
-        from pydra.tasks.mriqc.utils.misc import _datalad_get
+    # dataset = wf_inputs.get("t1w", []) + wf_inputs.get("t2w", [])
+    # message = "Building {modality} MRIQC workflow {detail}.".format(
+    #     modality="anatomical",
+    #     detail=(
+    #         f"for {len(dataset)} NIfTI files."
+    #         if len(dataset) > 2
+    #         else f"({' and '.join('<%s>' % v for v in dataset)})."
+    #     ),
+    # )
+    # logger.info(message)
+    # if exec_datalad_get:
+    #     from pydra.tasks.mriqc.utils.misc import _datalad_get
 
-        _datalad_get(dataset)
+    #     _datalad_get(dataset)
     # Initialize workflow
     # Define workflow, inputs and outputs
     # 0. Get data
@@ -85,11 +85,9 @@ def anat_qc_workflow(
     )
     # 2. species specific skull-stripping
     if wf_species.lower() == "human":
-        workflow.add(
-            synthstrip_wf(omp_nthreads=nipype_omp_nthreads)(
-                in_files=workflow.to_ras.lzout.out_file, name="skull_stripping"
-            )
-        )
+        syn_wf = synthstrip_wf(omp_nthreads=nipype_omp_nthreads, name="skull_stripping")
+        syn_wf.inputs.in_files = workflow.to_ras.lzout.out_file
+        workflow.add(syn_wf)
         ss_bias_field = "outputnode.bias_image"
     else:
         from nirodents.workflows.brainextraction import init_rodent_brain_extraction_wf
@@ -291,6 +289,8 @@ def headmsk_wf(name="HeadMaskWorkflow", omp_nthreads=1, wf_species="human"):
             name="enhance",
         )
     )
+
+    # Niu
     workflow.add(
         niu.Function(
             input_names=["in_file", "brainmask", "sigma"],
@@ -301,6 +301,8 @@ def headmsk_wf(name="HeadMaskWorkflow", omp_nthreads=1, wf_species="human"):
             name="gradient",
         )
     )
+
+    # Niu
     workflow.add(
         niu.Function(
             input_names=["in_file", "brainmask", "aniso", "thresh"],
