@@ -3,9 +3,11 @@ from fileformats.generic import Directory, File
 import logging
 from pathlib import Path
 from pydra.engine import Workflow
-from pydra.engine.specs import MultiInputObj
+from pydra.engine.specs import MultiInputObj, BaseSpec, SpecInfo
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from .iqm_file_sink import IQMFileSink
+import typing as ty
 
 
 logger = logging.getLogger(__name__)

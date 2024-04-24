@@ -1,6 +1,9 @@
+import attrs
 import logging
 from pathlib import Path
 from pydra.engine import Workflow
+from pydra.engine.specs import BaseSpec, SpecInfo
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from pydra.tasks.mriqc.interfaces import (
     ArtifactMask,
@@ -17,6 +20,7 @@ from pydra.tasks.niworkflows.interfaces.fixes import (
     FixHeaderApplyTransforms as ApplyTransforms,
 )
 from templateflow.api import get as get_template
+import typing as ty
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +39,7 @@ def anat_qc_workflow(
     exec_webapi_token="<secret_token>",
     exec_webapi_url="https://mriqc.nimh.nih.gov:443/api/v1",
     exec_work_dir=None,
+    in_file=attrs.NOTHING,
     name="anatMRIQC",
     nipype_omp_nthreads=10,
     wf_inputs=None,
@@ -59,22 +64,22 @@ def anat_qc_workflow(
     if exec_work_dir is None:
         exec_work_dir = Path.cwd()
 
-    workflow = Workflow(name=name, input_spec=["in_file"])
+    workflow = Workflow(name=name, input_spec=["in_file"], in_file=in_file)
 
-    # dataset = wf_inputs.get("t1w", []) + wf_inputs.get("t2w", [])
-    # message = "Building {modality} MRIQC workflow {detail}.".format(
-    #     modality="anatomical",
-    #     detail=(
-    #         f"for {len(dataset)} NIfTI files."
-    #         if len(dataset) > 2
-    #         else f"({' and '.join('<%s>' % v for v in dataset)})."
-    #     ),
-    # )
-    # logger.info(message)
-    # if exec_datalad_get:
-    #     from pydra.tasks.mriqc.utils.misc import _datalad_get
+    dataset = wf_inputs.get("t1w", []) + wf_inputs.get("t2w", [])
+    message = "Building {modality} MRIQC workflow {detail}.".format(
+        modality="anatomical",
+        detail=(
+            f"for {len(dataset)} NIfTI files."
+            if len(dataset) > 2
+            else f"({' and '.join('<%s>' % v for v in dataset)})."
+        ),
+    )
+    logger.info(message)
+    if exec_datalad_get:
+        from pydra.tasks.mriqc.utils.misc import _datalad_get
 
-    #     _datalad_get(dataset)
+        _datalad_get(dataset)
     # Initialize workflow
     # Define workflow, inputs and outputs
     # 0. Get data
@@ -85,9 +90,13 @@ def anat_qc_workflow(
     )
     # 2. species specific skull-stripping
     if wf_species.lower() == "human":
-        syn_wf = synthstrip_wf(omp_nthreads=nipype_omp_nthreads, name="skull_stripping")
-        syn_wf.inputs.in_files = workflow.to_ras.lzout.out_file
-        workflow.add(syn_wf)
+        workflow.add(
+            synthstrip_wf(
+                omp_nthreads=nipype_omp_nthreads,
+                in_files=workflow.to_ras.lzout.out_file,
+                name="skull_stripping",
+            )
+        )
         ss_bias_field = "outputnode.bias_image"
     else:
         from nirodents.workflows.brainextraction import init_rodent_brain_extraction_wf
@@ -96,21 +105,22 @@ def anat_qc_workflow(
         ss_bias_field = "final_n4.bias_image"
     # 3. Head mask
     workflow.add(
-        headmsk_wf(omp_nthreads=nipype_omp_nthreads, wf_species=wf_species)(name="hmsk")
+        headmsk_wf(omp_nthreads=nipype_omp_nthreads, wf_species=wf_species, name="hmsk")
     )
     # 4. Spatial Normalization, using ANTs
     workflow.add(
         spatial_normalization(
-            exec_ants_float=exec_ants_float,
             exec_debug=exec_debug,
-            nipype_omp_nthreads=nipype_omp_nthreads,
             wf_species=wf_species,
             wf_template_id=wf_template_id,
-        )(name="norm")
+            nipype_omp_nthreads=nipype_omp_nthreads,
+            exec_ants_float=exec_ants_float,
+            name="norm",
+        )
     )
     # 5. Air mask (with and without artifacts)
     workflow.add(
-        airmsk_wf()(
+        airmsk_wf(
             ind2std_xfm=workflow.norm.lzout.ind2std_xfm,
             in_file=workflow.to_ras.lzout.out_file,
             head_mask=workflow.hmsk.lzout.out_file,
@@ -119,7 +129,8 @@ def anat_qc_workflow(
     )
     # 6. Brain tissue segmentation
     workflow.add(
-        init_brain_tissue_segmentation(nipype_omp_nthreads=nipype_omp_nthreads)(
+        init_brain_tissue_segmentation(
+            nipype_omp_nthreads=nipype_omp_nthreads,
             std_tpms=workflow.norm.lzout.out_tpms,
             in_file=workflow.hmsk.lzout.out_denoised,
             name="bts",
@@ -128,11 +139,10 @@ def anat_qc_workflow(
     # 7. Compute IQMs
     workflow.add(
         compute_iqms(
-            exec_bids_database_dir=exec_bids_database_dir,
             exec_dsname=exec_dsname,
+            exec_bids_database_dir=exec_bids_database_dir,
             exec_output_dir=exec_output_dir,
             wf_species=wf_species,
-        )(
             in_file=workflow.lzin.in_file,
             std_tpms=workflow.norm.lzout.out_tpms,
             in_ras=workflow.to_ras.lzout.out_file,
@@ -152,7 +162,6 @@ def anat_qc_workflow(
             exec_verbose_reports=exec_verbose_reports,
             exec_work_dir=exec_work_dir,
             wf_species=wf_species,
-        )(
             in_file=workflow.lzin.in_file,
             mni_report=workflow.norm.lzout.out_report,
             in_ras=workflow.to_ras.lzout.out_file,
@@ -209,7 +218,12 @@ def anat_qc_workflow(
     return workflow
 
 
-def airmsk_wf(name="AirMaskWorkflow"):
+def airmsk_wf(
+    head_mask=attrs.NOTHING,
+    in_file=attrs.NOTHING,
+    ind2std_xfm=attrs.NOTHING,
+    name="AirMaskWorkflow",
+):
     """
     Calculate air, artifacts and "hat" masks to evaluate noise in the background.
 
@@ -241,7 +255,13 @@ def airmsk_wf(name="AirMaskWorkflow"):
             wf = airmsk_wf()
 
     """
-    workflow = Workflow(name=name, input_spec=["head_mask", "in_file", "ind2std_xfm"])
+    workflow = Workflow(
+        name=name,
+        input_spec=["head_mask", "in_file", "ind2std_xfm"],
+        ind2std_xfm=ind2std_xfm,
+        head_mask=head_mask,
+        in_file=in_file,
+    )
 
     workflow.add(RotationMask(in_file=workflow.lzin.in_file, name="rotmsk"))
     workflow.add(
@@ -261,7 +281,14 @@ def airmsk_wf(name="AirMaskWorkflow"):
     return workflow
 
 
-def headmsk_wf(name="HeadMaskWorkflow", omp_nthreads=1, wf_species="human"):
+def headmsk_wf(
+    brainmask=attrs.NOTHING,
+    in_file=attrs.NOTHING,
+    in_tpms=attrs.NOTHING,
+    name="HeadMaskWorkflow",
+    omp_nthreads=1,
+    wf_species="human",
+):
     """
     Computes a head mask as in [Mortamet2009]_.
 
@@ -275,39 +302,64 @@ def headmsk_wf(name="HeadMaskWorkflow", omp_nthreads=1, wf_species="human"):
     """
     from pydra.tasks.niworkflows.interfaces.nibabel import ApplyMask
 
-    workflow = Workflow(name=name, input_spec=["brainmask", "in_file", "in_tpms"])
+    workflow = Workflow(
+        name=name,
+        input_spec=["brainmask", "in_file", "in_tpms"],
+        brainmask=brainmask,
+        in_tpms=in_tpms,
+        in_file=in_file,
+    )
 
     def _select_wm(inlist):
         return [f for f in inlist if "WM" in f][0]
 
     workflow.add(
-        niu.Function(
-            input_names=["in_file", "wm_tpm"],
-            output_names=["out_file"],
-            function=_enhance,
+        FunctionTask(
+            input_spec=SpecInfo(
+                name="FunctionIn",
+                bases=(BaseSpec,),
+                fields=[("in_file", ty.Any), ("wm_tpm", ty.Any)],
+            ),
+            output_spec=SpecInfo(
+                name="FunctionOut", bases=(BaseSpec,), fields=[("out_file", ty.Any)]
+            ),
+            func=_enhance,
             in_file=workflow.lzin.in_file,
             name="enhance",
         )
     )
-
-    # Niu
     workflow.add(
-        niu.Function(
-            input_names=["in_file", "brainmask", "sigma"],
-            output_names=["out_file"],
-            function=image_gradient,
+        FunctionTask(
+            input_spec=SpecInfo(
+                name="FunctionIn",
+                bases=(BaseSpec,),
+                fields=[("in_file", ty.Any), ("brainmask", ty.Any), ("sigma", ty.Any)],
+            ),
+            output_spec=SpecInfo(
+                name="FunctionOut", bases=(BaseSpec,), fields=[("out_file", ty.Any)]
+            ),
+            func=image_gradient,
             brainmask=workflow.lzin.brainmask,
             in_file=workflow.enhance.lzout.out_file,
             name="gradient",
         )
     )
-
-    # Niu
     workflow.add(
-        niu.Function(
-            input_names=["in_file", "brainmask", "aniso", "thresh"],
-            output_names=["out_file"],
-            function=gradient_threshold,
+        FunctionTask(
+            input_spec=SpecInfo(
+                name="FunctionIn",
+                bases=(BaseSpec,),
+                fields=[
+                    ("in_file", ty.Any),
+                    ("brainmask", ty.Any),
+                    ("aniso", ty.Any),
+                    ("thresh", ty.Any),
+                ],
+            ),
+            output_spec=SpecInfo(
+                name="FunctionOut", bases=(BaseSpec,), fields=[("out_file", ty.Any)]
+            ),
+            func=gradient_threshold,
             brainmask=workflow.lzin.brainmask,
             in_file=workflow.gradient.lzout.out_file,
             name="thresh",
@@ -340,7 +392,11 @@ def headmsk_wf(name="HeadMaskWorkflow", omp_nthreads=1, wf_species="human"):
 
 
 def init_brain_tissue_segmentation(
-    name="brain_tissue_segmentation", nipype_omp_nthreads=10
+    brainmask=attrs.NOTHING,
+    in_file=attrs.NOTHING,
+    name="brain_tissue_segmentation",
+    nipype_omp_nthreads=10,
+    std_tpms=attrs.NOTHING,
 ):
     """
     Setup a workflow for brain tissue segmentation.
@@ -355,7 +411,13 @@ def init_brain_tissue_segmentation(
     """
     from pydra.tasks.ants.auto import Atropos
 
-    workflow = Workflow(name=name, input_spec=["brainmask", "in_file", "std_tpms"])
+    workflow = Workflow(
+        name=name,
+        input_spec=["brainmask", "in_file", "std_tpms"],
+        std_tpms=std_tpms,
+        brainmask=brainmask,
+        in_file=in_file,
+    )
 
     def _format_tpm_names(in_files, fname_string=None):
         import glob
@@ -380,10 +442,14 @@ def init_brain_tissue_segmentation(
         return file_format, out_files
 
     workflow.add(
-        niu.Function(
-            input_names=["in_files"],
-            output_names=["file_format"],
-            function=_format_tpm_names,
+        FunctionTask(
+            input_spec=SpecInfo(
+                name="FunctionIn", bases=(BaseSpec,), fields=[("in_files", ty.Any)]
+            ),
+            output_spec=SpecInfo(
+                name="FunctionOut", bases=(BaseSpec,), fields=[("file_format", ty.Any)]
+            ),
+            func=_format_tpm_names,
             execution={"keep_inputs": True, "remove_unnecessary_outputs": False},
             std_tpms=workflow.lzin.std_tpms,
             name="format_tpm_names",
@@ -423,6 +489,9 @@ def init_brain_tissue_segmentation(
 def spatial_normalization(
     exec_ants_float=False,
     exec_debug=False,
+    modality=attrs.NOTHING,
+    moving_image=attrs.NOTHING,
+    moving_mask=attrs.NOTHING,
     name="SpatialNormalization",
     nipype_omp_nthreads=10,
     wf_species="human",
@@ -435,7 +504,11 @@ def spatial_normalization(
 
     # Have the template id handy
     workflow = Workflow(
-        name=name, input_spec=["modality", "moving_image", "moving_mask"]
+        name=name,
+        input_spec=["modality", "moving_image", "moving_mask"],
+        moving_image=moving_image,
+        moving_mask=moving_mask,
+        modality=modality,
     )
 
     tpl_id = wf_template_id
@@ -494,10 +567,23 @@ def spatial_normalization(
 
 
 def compute_iqms(
+    airmask=attrs.NOTHING,
+    artmask=attrs.NOTHING,
+    brainmask=attrs.NOTHING,
     exec_bids_database_dir=None,
     exec_dsname="<unset>",
     exec_output_dir=None,
+    hatmask=attrs.NOTHING,
+    headmask=attrs.NOTHING,
+    in_file=attrs.NOTHING,
+    in_inu=attrs.NOTHING,
+    in_ras=attrs.NOTHING,
+    inu_corrected=attrs.NOTHING,
     name="ComputeIQMs",
+    pvms=attrs.NOTHING,
+    rotmask=attrs.NOTHING,
+    segmentation=attrs.NOTHING,
+    std_tpms=attrs.NOTHING,
     wf_species="human",
 ):
     """
@@ -532,6 +618,19 @@ def compute_iqms(
             "segmentation",
             "std_tpms",
         ],
+        headmask=headmask,
+        artmask=artmask,
+        in_file=in_file,
+        std_tpms=std_tpms,
+        hatmask=hatmask,
+        rotmask=rotmask,
+        in_inu=in_inu,
+        pvms=pvms,
+        airmask=airmask,
+        inu_corrected=inu_corrected,
+        brainmask=brainmask,
+        segmentation=segmentation,
+        in_ras=in_ras,
     )
 
     # Extract metadata

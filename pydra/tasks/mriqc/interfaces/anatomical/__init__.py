@@ -4,7 +4,8 @@ import logging
 import numpy as np
 from pathlib import Path
 from pydra.engine import Workflow
-from pydra.engine.specs import MultiInputObj
+from pydra.engine.specs import MultiInputObj, BaseSpec, SpecInfo
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from .artifact_mask import ArtifactMask
 from .compute_qi2 import ComputeQI2
@@ -12,6 +13,7 @@ from .harmonize import Harmonize
 from .rotation_mask import RotationMask
 from .structural_qc import StructuralQC
 import scipy.ndimage as nd
+import typing as ty
 
 
 logger = logging.getLogger(__name__)

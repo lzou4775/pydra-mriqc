@@ -6,7 +6,10 @@ from pydra.tasks.mriqc.workflows.diffusion.base import compute_iqms
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< HEAD
 # Niu is not defined
+=======
+>>>>>>> auto-conv-updates
 def test_compute_iqms():
     workflow = compute_iqms()
     assert isinstance(workflow, Workflow)

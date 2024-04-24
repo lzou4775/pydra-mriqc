@@ -1,6 +1,8 @@
+import attrs
 import logging
 from pathlib import Path
 from pydra.engine import Workflow
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from pydra.tasks.mriqc.interfaces import DerivativesDataSink
 from pydra.tasks.nireports.interfaces.dmri import DWIHeatmap
@@ -13,9 +15,32 @@ logger = logging.getLogger(__name__)
 
 
 def init_dwi_report_wf(
+    brain_mask=attrs.NOTHING,
+    epi_mean=attrs.NOTHING,
+    epi_parc=attrs.NOTHING,
     exec_verbose_reports=False,
     exec_work_dir=None,
+    fd_thres=attrs.NOTHING,
+    hmc_epi=attrs.NOTHING,
+    hmc_fd=attrs.NOTHING,
+    in_avgmap=attrs.NOTHING,
+    in_bdict=attrs.NOTHING,
+    in_dvars=attrs.NOTHING,
+    in_epi=attrs.NOTHING,
+    in_fa=attrs.NOTHING,
+    in_fft=attrs.NOTHING,
+    in_md=attrs.NOTHING,
+    in_parcellation=attrs.NOTHING,
+    in_ras=attrs.NOTHING,
+    in_shells=attrs.NOTHING,
+    in_spikes=attrs.NOTHING,
+    in_stdmap=attrs.NOTHING,
+    meta_sidecar=attrs.NOTHING,
+    mni_report=attrs.NOTHING,
     name="dwi_report_wf",
+    name_source=attrs.NOTHING,
+    noise_floor=attrs.NOTHING,
+    outliers=attrs.NOTHING,
     wf_biggest_file_gb=1,
     wf_fd_thres=0.2,
     wf_fft_spikes_detector=False,
@@ -69,6 +94,29 @@ def init_dwi_report_wf(
             "noise_floor",
             "outliers",
         ],
+        name_source=name_source,
+        mni_report=mni_report,
+        in_bdict=in_bdict,
+        epi_mean=epi_mean,
+        in_md=in_md,
+        in_parcellation=in_parcellation,
+        in_epi=in_epi,
+        in_fft=in_fft,
+        outliers=outliers,
+        in_shells=in_shells,
+        meta_sidecar=meta_sidecar,
+        fd_thres=fd_thres,
+        hmc_fd=hmc_fd,
+        in_dvars=in_dvars,
+        brain_mask=brain_mask,
+        in_stdmap=in_stdmap,
+        noise_floor=noise_floor,
+        epi_parc=epi_parc,
+        in_fa=in_fa,
+        in_avgmap=in_avgmap,
+        in_spikes=in_spikes,
+        hmc_epi=hmc_epi,
+        in_ras=in_ras,
     )
 
     verbose = exec_verbose_reports
@@ -142,10 +190,8 @@ def init_dwi_report_wf(
     workflow.set_output([('bval', workflow.inputnode_in_shells.lzout.out)])
     # fmt: on
     workflow.add(
-        niu.Function(
-            function=_get_wm,
-            in_parcellation=workflow.lzin.in_parcellation,
-            name="get_wm",
+        FunctionTask(
+            func=_get_wm, in_parcellation=workflow.lzin.in_parcellation, name="get_wm"
         )
     )
     workflow.add(
@@ -177,8 +223,8 @@ def init_dwi_report_wf(
         )
     )
     workflow.add(
-        niu.Function(
-            function=_carpet_parcellation,
+        FunctionTask(
+            func=_carpet_parcellation,
             epi_parc=workflow.lzin.epi_parc,
             crown_mask=workflow.subtract_mask.lzout.out_mask,
             name="parcels",
@@ -298,7 +344,7 @@ def _get_wm(in_file, radius=2):
 
     import nibabel as nb
     import numpy as np
-    from nipype.utils.filemanip import fname_presuffix
+    from pydra.tasks.mriqc.nipype_ports.utils.filemanip import fname_presuffix
     from scipy import ndimage as ndi
     from skimage.morphology import ball
 

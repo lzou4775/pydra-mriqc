@@ -40,7 +40,7 @@ def IQMFileSink(
     """
 
     out_file, out_file = _gen_outfile(
-        out_dir=out_dir, in_file=in_file, dismiss_entities=dismiss_entities
+        out_dir=out_dir, dismiss_entities=dismiss_entities, in_file=in_file
     )
 
     if root is not attrs.NOTHING:
@@ -113,7 +113,7 @@ def IQMFileSink(
 # Nipype methods converted into functions
 
 
-def _gen_outfile(out_dir=None, in_file=None, dismiss_entities=None):
+def _gen_outfile(out_dir=None, dismiss_entities=None, in_file=None):
     out_file = attrs.NOTHING
     out_dir = Path()
     if out_dir is not attrs.NOTHING:

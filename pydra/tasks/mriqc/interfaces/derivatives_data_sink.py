@@ -39,7 +39,7 @@ def DerivativesDataSink(
     -------
 
     >>> from fileformats.generic import Directory, File
-    >>> from pydra.engine.specs import MultiOutputType, MultiInputObj
+    >>> from pydra.engine.specs import MultiInputObj, MultiOutputType
     >>> from pydra.tasks.mriqc.interfaces.derivatives_data_sink import DerivativesDataSink
 
     """

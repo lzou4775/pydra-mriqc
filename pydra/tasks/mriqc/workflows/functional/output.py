@@ -1,17 +1,36 @@
+import attrs
 import logging
 from pathlib import Path
 from pydra.engine import Workflow
+from pydra.engine.specs import BaseSpec, SpecInfo
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from pydra.tasks.mriqc.interfaces import DerivativesDataSink
+import typing as ty
 
 
 logger = logging.getLogger(__name__)
 
 
 def init_func_report_wf(
+    brainmask=attrs.NOTHING,
+    epi_mean=attrs.NOTHING,
+    epi_parc=attrs.NOTHING,
     exec_verbose_reports=False,
     exec_work_dir=None,
+    fd_thres=attrs.NOTHING,
+    hmc_epi=attrs.NOTHING,
+    hmc_fd=attrs.NOTHING,
+    in_dvars=attrs.NOTHING,
+    in_fft=attrs.NOTHING,
+    in_ras=attrs.NOTHING,
+    in_spikes=attrs.NOTHING,
+    in_stddev=attrs.NOTHING,
+    meta_sidecar=attrs.NOTHING,
+    mni_report=attrs.NOTHING,
     name="func_report_wf",
+    name_source=attrs.NOTHING,
+    outliers=attrs.NOTHING,
     wf_biggest_file_gb=1,
     wf_fft_spikes_detector=False,
     wf_species="human",
@@ -57,6 +76,21 @@ def init_func_report_wf(
             "name_source",
             "outliers",
         ],
+        meta_sidecar=meta_sidecar,
+        name_source=name_source,
+        in_spikes=in_spikes,
+        hmc_epi=hmc_epi,
+        outliers=outliers,
+        epi_parc=epi_parc,
+        mni_report=mni_report,
+        epi_mean=epi_mean,
+        in_stddev=in_stddev,
+        in_fft=in_fft,
+        fd_thres=fd_thres,
+        in_dvars=in_dvars,
+        hmc_fd=hmc_fd,
+        brainmask=brainmask,
+        in_ras=in_ras,
     )
 
     verbose = exec_verbose_reports
@@ -66,10 +100,18 @@ def init_func_report_wf(
     # Set FD threshold
 
     workflow.add(
-        niu.Function(
-            input_names=["in_file", "in_mask"],
-            output_names=["out_file", "out_plot"],
-            function=spikes_mask,
+        FunctionTask(
+            input_spec=SpecInfo(
+                name="FunctionIn",
+                bases=(BaseSpec,),
+                fields=[("in_file", ty.Any), ("in_mask", ty.Any)],
+            ),
+            output_spec=SpecInfo(
+                name="FunctionOut",
+                bases=(BaseSpec,),
+                fields=[("out_file", ty.Any), ("out_plot", ty.Any)],
+            ),
+            func=spikes_mask,
             in_ras=workflow.lzin.in_ras,
             name="spmask",
         )
@@ -94,8 +136,8 @@ def init_func_report_wf(
         )
     )
     workflow.add(
-        niu.Function(
-            function=_carpet_parcellation,
+        FunctionTask(
+            func=_carpet_parcellation,
             epi_parc=workflow.lzin.epi_parc,
             crown_mask=workflow.subtract_mask.lzout.out_mask,
             name="parcels",

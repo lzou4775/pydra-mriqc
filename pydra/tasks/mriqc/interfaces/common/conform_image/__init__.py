@@ -4,9 +4,11 @@ import logging
 import numpy as np
 from pathlib import Path
 from pydra.engine import Workflow
-from pydra.engine.specs import MultiInputObj
+from pydra.engine.specs import MultiInputObj, BaseSpec, SpecInfo
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from .conform_image import ConformImage
+import typing as ty
 
 
 logger = logging.getLogger(__name__)

@@ -6,12 +6,14 @@ import numpy as np
 from numpy.polynomial import Legendre
 from pathlib import Path
 from pydra.engine import Workflow
-from pydra.engine.specs import MultiInputObj
+from pydra.engine.specs import MultiInputObj, BaseSpec, SpecInfo
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from .compute_dvars import ComputeDVARS
 from .framewise_displacement import FramewiseDisplacement
 from .non_steady_state_detector import NonSteadyStateDetector
 from .tsnr import TSNR
+import typing as ty
 
 
 logger = logging.getLogger(__name__)
@@ -170,7 +172,7 @@ def plot_confound(tseries, figsize, name, units=None, series_tr=None, normalize=
     """
     import matplotlib
 
-    matplotlib.use(config.get("execution", "matplotlib_backend"))
+    matplotlib.use("agg")
     import matplotlib.pyplot as plt
     from matplotlib.gridspec import GridSpec
     from matplotlib.backends.backend_pdf import FigureCanvasPdf as FigureCanvas

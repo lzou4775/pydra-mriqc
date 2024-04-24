@@ -1,18 +1,22 @@
+import attrs
+from collections.abc import Iterable
 import logging
 from pydra.tasks.mriqc.workflows.functional.output import init_func_report_wf
 import nibabel as nb
-
 from pydra.tasks.niworkflows.utils.connections import pop_file as _pop
 from pathlib import Path
 from pydra.engine import Workflow
+from pydra.engine.specs import BaseSpec, SpecInfo
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from pydra.tasks.niworkflows.utils.connections import pop_file as _pop
+import typing as ty
 
 
 logger = logging.getLogger(__name__)
 
 
-def fmri_bmsk_workflow(name="fMRIBrainMask"):
+def fmri_bmsk_workflow(in_file=attrs.NOTHING, name="fMRIBrainMask"):
     """
     Compute a brain mask for the input :abbr:`fMRI (functional MRI)` dataset.
 
@@ -27,7 +31,7 @@ def fmri_bmsk_workflow(name="fMRIBrainMask"):
     """
     from pydra.tasks.afni.auto import Automask
 
-    workflow = Workflow(name=name, input_spec=["in_file"])
+    workflow = Workflow(name=name, input_spec=["in_file"], in_file=in_file)
 
     workflow.add(
         Automask(outputtype="NIFTI_GZ", in_file=workflow.lzin.in_file, name="afni_msk")
@@ -40,6 +44,8 @@ def fmri_bmsk_workflow(name="fMRIBrainMask"):
 
 
 def epi_mni_align(
+    epi_mask=attrs.NOTHING,
+    epi_mean=attrs.NOTHING,
     exec_ants_float=False,
     exec_debug=False,
     name="SpatialNormalization",
@@ -71,7 +77,12 @@ def epi_mni_align(
     from templateflow.api import get as get_template
 
     # Get settings
-    workflow = Workflow(name=name, input_spec=["epi_mask", "epi_mean"])
+    workflow = Workflow(
+        name=name,
+        input_spec=["epi_mask", "epi_mean"],
+        epi_mask=epi_mask,
+        epi_mean=epi_mean,
+    )
 
     testing = exec_debug
     n_procs = nipype_nprocs
@@ -124,7 +135,7 @@ def epi_mni_align(
                 suffix="mask",
             )[0]
         )
-        workflow.add(niu.Function(function=_bspline_grid, name="bspline_grid"))
+        workflow.add(FunctionTask(func=_bspline_grid, name="bspline_grid"))
         # fmt: off
         workflow.bspline_grid.inputs.in_file = workflow.lzin.epi_mean
         workflow.n4itk.inputs.args = workflow.bspline_grid.lzout.out
@@ -168,6 +179,8 @@ def epi_mni_align(
 
 
 def hmc(
+    fd_radius=attrs.NOTHING,
+    in_file=attrs.NOTHING,
     name="fMRI_HMC",
     omp_nthreads=None,
     wf_biggest_file_gb=1,
@@ -190,7 +203,12 @@ def hmc(
     )
     from pydra.tasks.afni.auto import Despike, Refit, Volreg
 
-    workflow = Workflow(name=name, input_spec=["fd_radius", "in_file"])
+    workflow = Workflow(
+        name=name,
+        input_spec=["fd_radius", "in_file"],
+        fd_radius=fd_radius,
+        in_file=in_file,
+    )
 
     mem_gb = wf_biggest_file_gb
 
@@ -212,9 +230,13 @@ def hmc(
     )
     # Apply transforms to other echos
     workflow.add(
-        niu.Function(
-            function=_apply_transforms,
-            input_names=["in_file", "in_xfm"],
+        FunctionTask(
+            func=_apply_transforms,
+            input_spec=SpecInfo(
+                name="FunctionIn",
+                bases=(BaseSpec,),
+                fields=[("in_file", ty.Any), ("in_xfm", ty.Any)],
+            ),
             in_xfm=workflow.estimate_hm.lzout.oned_matrix_save,
             name="apply_hmc",
         )
@@ -307,9 +329,26 @@ def _apply_transforms(in_file, in_xfm):
 
 
 def compute_iqms(
+    acquisition=attrs.NOTHING,
+    brainmask=attrs.NOTHING,
+    epi_mean=attrs.NOTHING,
+    exclude_index=attrs.NOTHING,
     exec_dsname="<unset>",
     exec_output_dir=None,
+    fd_thres=attrs.NOTHING,
+    hmc_epi=attrs.NOTHING,
+    hmc_fd=attrs.NOTHING,
+    in_file=attrs.NOTHING,
+    in_ras=attrs.NOTHING,
+    in_tsnr=attrs.NOTHING,
+    metadata=attrs.NOTHING,
+    mpars=attrs.NOTHING,
     name="ComputeIQMs",
+    reconstruction=attrs.NOTHING,
+    run=attrs.NOTHING,
+    session=attrs.NOTHING,
+    subject=attrs.NOTHING,
+    task=attrs.NOTHING,
     wf_biggest_file_gb=1,
     wf_fft_spikes_detector=False,
 ):
@@ -357,6 +396,23 @@ def compute_iqms(
             "subject",
             "task",
         ],
+        hmc_epi=hmc_epi,
+        fd_thres=fd_thres,
+        in_file=in_file,
+        mpars=mpars,
+        in_tsnr=in_tsnr,
+        subject=subject,
+        reconstruction=reconstruction,
+        run=run,
+        session=session,
+        task=task,
+        exclude_index=exclude_index,
+        acquisition=acquisition,
+        brainmask=brainmask,
+        metadata=metadata,
+        hmc_fd=hmc_fd,
+        epi_mean=epi_mean,
+        in_ras=in_ras,
     )
 
     mem_gb = wf_biggest_file_gb
@@ -535,10 +591,20 @@ def compute_iqms(
         from pydra.tasks.mriqc.workflows.utils import slice_wise_fft
 
         workflow.add(
-            niu.Function(
-                input_names=["in_file"],
-                output_names=["n_spikes", "out_spikes", "out_fft"],
-                function=slice_wise_fft,
+            FunctionTask(
+                input_spec=SpecInfo(
+                    name="FunctionIn", bases=(BaseSpec,), fields=[("in_file", ty.Any)]
+                ),
+                output_spec=SpecInfo(
+                    name="FunctionOut",
+                    bases=(BaseSpec,),
+                    fields=[
+                        ("n_spikes", ty.Any),
+                        ("out_spikes", ty.Any),
+                        ("out_fft", ty.Any),
+                    ],
+                ),
+                func=slice_wise_fft,
                 name="spikes_fft",
             )
         )
@@ -594,6 +660,7 @@ def fmri_qc_workflow(
     exec_webapi_token="<secret_token>",
     exec_webapi_url="https://mriqc.nimh.nih.gov:443/api/v1",
     exec_work_dir=None,
+    in_file=attrs.NOTHING,
     name="funcMRIQC",
     nipype_nprocs=10,
     nipype_omp_nthreads=10,
@@ -631,7 +698,7 @@ def fmri_qc_workflow(
     if exec_work_dir is None:
         exec_work_dir = Path.cwd()
 
-    workflow = Workflow(name=name, input_spec=["in_file"])
+    workflow = Workflow(name=name, input_spec=["in_file"], in_file=in_file)
 
     mem_gb = wf_biggest_file_gb
     dataset = wf_inputs.get("bold", [])
@@ -642,7 +709,12 @@ def fmri_qc_workflow(
     full_files = []
     for bold_path in dataset:
         try:
-            bold_len = nb.load(bold_path).shape[3]
+            bold_len = nb.load(
+                bold_path[0]
+                if isinstance(bold_path, Iterable)
+                and not isinstance(bold_path, (str, bytes))
+                else bold_path
+            ).shape[3]
         except nb.filebasedimages.ImageFileError:
             bold_len = wf_min_len_bold
         except IndexError:  # shape has only 3 elements
@@ -665,7 +737,7 @@ def fmri_qc_workflow(
     logger.info(message)
     if set(dataset) - set(full_files):
         wf_inputs["bold"] = full_files
-        
+
     # Define workflow, inputs and outputs
     # 0. Get data, put it in RAS orientation
 
@@ -701,9 +773,11 @@ def fmri_qc_workflow(
         hmc(
             omp_nthreads=nipype_omp_nthreads,
             wf_biggest_file_gb=wf_biggest_file_gb,
-            wf_deoblique=wf_deoblique,
             wf_despike=wf_despike,
-        )(in_file=workflow.sanitize.lzout.out_file, name="hmcwf")
+            wf_deoblique=wf_deoblique,
+            in_file=workflow.sanitize.lzout.out_file,
+            name="hmcwf",
+        )
     )
     # Set HMC settings
     workflow.hmcwf.inputs.inputnode.fd_radius = wf_fd_radius
@@ -721,22 +795,22 @@ def fmri_qc_workflow(
     # EPI to MNI registration
     workflow.add(
         epi_mni_align(
-            exec_ants_float=exec_ants_float,
             exec_debug=exec_debug,
-            nipype_nprocs=nipype_nprocs,
-            nipype_omp_nthreads=nipype_omp_nthreads,
             wf_species=wf_species,
+            nipype_nprocs=nipype_nprocs,
             wf_template_id=wf_template_id,
-        )(name="ema")
+            nipype_omp_nthreads=nipype_omp_nthreads,
+            exec_ants_float=exec_ants_float,
+            name="ema",
+        )
     )
     # 7. Compute IQMs
     workflow.add(
         compute_iqms(
-            exec_dsname=exec_dsname,
-            exec_output_dir=exec_output_dir,
             wf_biggest_file_gb=wf_biggest_file_gb,
             wf_fft_spikes_detector=wf_fft_spikes_detector,
-        )(
+            exec_dsname=exec_dsname,
+            exec_output_dir=exec_output_dir,
             metadata=workflow.meta.lzout.out_dict,
             subject=workflow.meta.lzout.subject,
             session=workflow.meta.lzout.session,
@@ -759,11 +833,10 @@ def fmri_qc_workflow(
     workflow.add(
         init_func_report_wf(
             exec_verbose_reports=exec_verbose_reports,
-            exec_work_dir=exec_work_dir,
-            wf_biggest_file_gb=wf_biggest_file_gb,
             wf_fft_spikes_detector=wf_fft_spikes_detector,
             wf_species=wf_species,
-        )(
+            exec_work_dir=exec_work_dir,
+            wf_biggest_file_gb=wf_biggest_file_gb,
             in_file=workflow.lzin.in_file,
             in_ras=workflow.sanitize.lzout.out_file,
             epi_mean=workflow.mean.lzout.out_file,
@@ -802,7 +875,7 @@ def fmri_qc_workflow(
         )
 
         workflow.add(
-            fmri_bmsk_workflow(omp_nthreads=nipype_omp_nthreads)(name="skullstrip_epi")
+            fmri_bmsk_workflow(omp_nthreads=nipype_omp_nthreads, name="skullstrip_epi")
         )
         # fmt: off
 
@@ -821,10 +894,16 @@ def fmri_qc_workflow(
         from pydra.tasks.mriqc.workflows.anatomical.base import _binarize
 
         workflow.add(
-            niu.Function(
-                input_names=["in_file", "threshold"],
-                output_names=["out_file"],
-                function=_binarize,
+            FunctionTask(
+                input_spec=SpecInfo(
+                    name="FunctionIn",
+                    bases=(BaseSpec,),
+                    fields=[("in_file", ty.Any), ("threshold", ty.Any)],
+                ),
+                output_spec=SpecInfo(
+                    name="FunctionOut", bases=(BaseSpec,), fields=[("out_file", ty.Any)]
+                ),
+                func=_binarize,
                 name="binarise_labels",
             )
         )

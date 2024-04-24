@@ -4,12 +4,14 @@ import logging
 import numpy as np
 from pathlib import Path
 from pydra.engine import Workflow
-from pydra.engine.specs import MultiInputObj
+from pydra.engine.specs import MultiInputObj, BaseSpec, SpecInfo
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from .functional_qc import FunctionalQC
 from .gather_timeseries import GatherTimeseries
 from .select_echo import SelectEcho
 from .spikes import Spikes
+import typing as ty
 
 
 logger = logging.getLogger(__name__)

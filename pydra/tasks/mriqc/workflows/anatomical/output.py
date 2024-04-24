@@ -1,3 +1,4 @@
+import attrs
 import logging
 from pathlib import Path
 from pydra.engine import Workflow
@@ -7,9 +8,18 @@ logger = logging.getLogger(__name__)
 
 
 def init_anat_report_wf(
+    airmask=attrs.NOTHING,
+    artmask=attrs.NOTHING,
+    brainmask=attrs.NOTHING,
     exec_verbose_reports=False,
     exec_work_dir=None,
+    headmask=attrs.NOTHING,
+    in_ras=attrs.NOTHING,
+    mni_report=attrs.NOTHING,
     name: str = "anat_report_wf",
+    name_source=attrs.NOTHING,
+    noisefit=attrs.NOTHING,
+    segmentation=attrs.NOTHING,
     wf_species="human",
 ):
     """
@@ -42,6 +52,15 @@ def init_anat_report_wf(
             "noisefit",
             "segmentation",
         ],
+        name_source=name_source,
+        headmask=headmask,
+        artmask=artmask,
+        mni_report=mni_report,
+        airmask=airmask,
+        brainmask=brainmask,
+        segmentation=segmentation,
+        noisefit=noisefit,
+        in_ras=in_ras,
     )
 
     verbose = exec_verbose_reports

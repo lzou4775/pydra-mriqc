@@ -1,7 +1,9 @@
+import attrs
 import logging
 import numpy as np
 from pathlib import Path
 from pydra.engine import Workflow
+from pydra.engine.task import FunctionTask
 import pydra.mark
 
 
@@ -10,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def dmri_qc_workflow(
     exec_ants_float=False,
-    exec_bids_database_dir="/Users/lekangzoukang/Data/ds000114/sub-02/ses-test/anat/sub-02-ses-test-T1w.nii.gz ",
+    exec_bids_database_dir=None,
     exec_datalad_get=True,
     exec_debug=False,
     exec_dsname="<unset>",
@@ -19,6 +21,7 @@ def dmri_qc_workflow(
     exec_output_dir=None,
     exec_verbose_reports=False,
     exec_work_dir=None,
+    in_file=attrs.NOTHING,
     name="dwiMRIQC",
     nipype_nprocs=10,
     nipype_omp_nthreads=10,
@@ -26,7 +29,7 @@ def dmri_qc_workflow(
     wf_fd_radius=50,
     wf_fd_thres=0.2,
     wf_fft_spikes_detector=False,
-    wf_inputs=None,  # dataset leave it as it is at this moment
+    wf_inputs=None,
     wf_min_len_dwi=7,
     wf_species="human",
     wf_template_id="MNI152NLin2009cAsym",
@@ -44,7 +47,7 @@ def dmri_qc_workflow(
 
     """
     from pydra.tasks.afni.auto import Volreg
-    from pydra.tasks.mrtrix3.v3_0 import DwiDenoise
+    from pydra.tasks.mrtrix3.v3_0 import DWIDenoise
     from pydra.tasks.niworkflows.interfaces.header import SanitizeImage
     from pydra.tasks.niworkflows.interfaces.images import RobustAverage
     from pydra.tasks.mriqc.interfaces.diffusion import (
@@ -64,40 +67,35 @@ def dmri_qc_workflow(
     if exec_work_dir is None:
         exec_work_dir = Path.cwd()
 
-    workflow = Workflow(name=name, input_spec=["in_file"])
+    workflow = Workflow(name=name, input_spec=["in_file"], in_file=in_file)
 
-    ### Dataset set to run before running with the workflow
+    dataset = wf_inputs.get("dwi", [])
+    full_data = []
+    for dwi_path in dataset:
+        bval = exec_layout.get_bval(dwi_path)
+        if bval and Path(bval).exists() and len(np.loadtxt(bval)) > wf_min_len_dwi:
+            full_data.append(dwi_path)
+        else:
+            logger.warn(
+                f"Dismissing {dwi_path} for processing. b-values are missing or "
+                "insufficient in number to execute the workflow."
+            )
+    if set(dataset) - set(full_data):
+        wf_inputs["dwi"] = full_data
 
-    # dataset = wf_inputs.get("dwi", [])
-    # full_data = []
-    # for dwi_path in dataset:
-    #     bval = exec_layout.get_bval(dwi_path)
-    #     if bval and Path(bval).exists() and len(np.loadtxt(bval)) > wf_min_len_dwi:
-    #         full_data.append(dwi_path)
-    #     else:
-    #         logger.warn(
-    #             f"Dismissing {dwi_path} for processing. b-values are missing or "
-    #             "insufficient in number to execute the workflow."
-    #         )
-    # if set(dataset) - set(full_data):
-    #     wf_inputs["dwi"] = full_data
+    message = "Building {modality} MRIQC workflow {detail}.".format(
+        modality="diffusion",
+        detail=(
+            f"for {len(full_data)} NIfTI files."
+            if len(full_data) > 2
+            else f"({' and '.join('<%s>' % v for v in full_data)})."
+        ),
+    )
+    logger.info(message)
+    if exec_datalad_get:
+        from pydra.tasks.mriqc.utils.misc import _datalad_get
 
-    ### Full_data not defined because of the previous section comment (*** will use later)
-
-    # message = "Building {modality} MRIQC workflow {detail}.".format(
-    #     modality="diffusion",
-    #     detail=(
-    #         f"for {len(full_data)} NIfTI files."
-    #         if len(full_data) > 2
-    #         else f"({' and '.join('<%s>' % v for v in full_data)})."
-    #     ),
-    # )
-    # logger.info(message)
-    # if exec_datalad_get:
-    #     from pydra.tasks.mriqc.utils.misc import _datalad_get
-
-    #     _datalad_get(full_data)
-
+        _datalad_get(full_data)
     # Define workflow, inputs and outputs
     # 0. Get data, put it in RAS orientation
 
@@ -142,14 +140,18 @@ def dmri_qc_workflow(
     )
     # Calculate brainmask
     workflow.add(
-        dmri_bmsk_workflow(omp_nthreads=nipype_omp_nthreads)(
-            in_files=workflow.dwi_ref.lzout.out_file, name="dmri_bmsk"
+        dmri_bmsk_workflow(
+            omp_nthreads=nipype_omp_nthreads,
+            in_files=workflow.dwi_ref.lzout.out_file,
+            name="dmri_bmsk",
         )
     )
     # HMC: head motion correct
     workflow.add(
-        hmc_workflow(wf_fd_radius=wf_fd_radius)(
-            in_bvec=workflow.load_bmat.lzout.out_bvec_file, name="hmcwf"
+        hmc_workflow(
+            wf_fd_radius=wf_fd_radius,
+            in_bvec=workflow.load_bmat.lzout.out_bvec_file,
+            name="hmcwf",
         )
     )
     workflow.add(
@@ -218,13 +220,12 @@ def dmri_qc_workflow(
     # EPI to MNI registration
     workflow.add(
         epi_mni_align(
-            exec_ants_float=exec_ants_float,
             exec_debug=exec_debug,
-            nipype_nprocs=nipype_nprocs,
-            nipype_omp_nthreads=nipype_omp_nthreads,
             wf_species=wf_species,
+            nipype_nprocs=nipype_nprocs,
             wf_template_id=wf_template_id,
-        )(
+            nipype_omp_nthreads=nipype_omp_nthreads,
+            exec_ants_float=exec_ants_float,
             epi_mean=workflow.dwi_ref.lzout.out_file,
             epi_mask=workflow.dmri_bmsk.lzout.out_mask,
             name="spatial_norm",
@@ -233,10 +234,9 @@ def dmri_qc_workflow(
     # Compute IQMs
     workflow.add(
         compute_iqms(
-            exec_bids_database_dir=exec_bids_database_dir,
             exec_dsname=exec_dsname,
+            exec_bids_database_dir=exec_bids_database_dir,
             exec_output_dir=exec_output_dir,
-        )(
             in_file=workflow.lzin.in_file,
             b_values_file=workflow.load_bmat.lzout.out_bval_file,
             qspace_neighbors=workflow.load_bmat.lzout.qspace_neighbors,
@@ -312,7 +312,13 @@ def dmri_qc_workflow(
     return workflow
 
 
-def hmc_workflow(name="dMRI_HMC", wf_fd_radius=50):
+def hmc_workflow(
+    in_bvec=attrs.NOTHING,
+    in_file=attrs.NOTHING,
+    name="dMRI_HMC",
+    reference=attrs.NOTHING,
+    wf_fd_radius=50,
+):
     """
     Create a :abbr:`HMC (head motion correction)` workflow for dMRI.
 
@@ -330,7 +336,13 @@ def hmc_workflow(name="dMRI_HMC", wf_fd_radius=50):
     from pydra.tasks.afni.auto import Volreg
     from pydra.tasks.mriqc.interfaces.diffusion import RotateVectors
 
-    workflow = Workflow(name=name, input_spec=["in_bvec", "in_file", "reference"])
+    workflow = Workflow(
+        name=name,
+        input_spec=["in_bvec", "in_file", "reference"],
+        in_bvec=in_bvec,
+        reference=reference,
+        in_file=in_file,
+    )
 
     # calculate hmc parameters
     workflow.add(
@@ -371,6 +383,8 @@ def hmc_workflow(name="dMRI_HMC", wf_fd_radius=50):
 
 
 def epi_mni_align(
+    epi_mask=attrs.NOTHING,
+    epi_mean=attrs.NOTHING,
     exec_ants_float=False,
     exec_debug=False,
     name="SpatialNormalization",
@@ -402,7 +416,12 @@ def epi_mni_align(
     from templateflow.api import get as get_template
 
     # Get settings
-    workflow = Workflow(name=name, input_spec=["epi_mask", "epi_mean"])
+    workflow = Workflow(
+        name=name,
+        input_spec=["epi_mask", "epi_mean"],
+        epi_mask=epi_mask,
+        epi_mean=epi_mean,
+    )
 
     testing = exec_debug
     n_procs = nipype_nprocs
@@ -455,7 +474,7 @@ def epi_mni_align(
                 suffix="mask",
             )[0]
         )
-        workflow.add(niu.Function(function=_bspline_grid, name="bspline_grid"))
+        workflow.add(FunctionTask(func=_bspline_grid, name="bspline_grid"))
         # fmt: off
         workflow.bspline_grid.inputs.in_file = workflow.lzin.epi_mean
         workflow.n4itk.inputs.args = workflow.bspline_grid.lzout.out
@@ -499,10 +518,32 @@ def epi_mni_align(
 
 
 def compute_iqms(
+    b_values_file=attrs.NOTHING,
+    b_values_shells=attrs.NOTHING,
+    brain_mask=attrs.NOTHING,
+    cc_mask=attrs.NOTHING,
     exec_bids_database_dir=None,
     exec_dsname="<unset>",
     exec_output_dir=None,
+    framewise_displacement=attrs.NOTHING,
+    in_b0=attrs.NOTHING,
+    in_bvec=attrs.NOTHING,
+    in_bvec_diff=attrs.NOTHING,
+    in_bvec_rotated=attrs.NOTHING,
+    in_cfa=attrs.NOTHING,
+    in_fa=attrs.NOTHING,
+    in_fa_degenerate=attrs.NOTHING,
+    in_fa_nans=attrs.NOTHING,
+    in_file=attrs.NOTHING,
+    in_md=attrs.NOTHING,
+    in_noise=attrs.NOTHING,
+    in_shells=attrs.NOTHING,
+    n_shells=attrs.NOTHING,
     name="ComputeIQMs",
+    piesno_sigma=attrs.NOTHING,
+    qspace_neighbors=attrs.NOTHING,
+    spikes_mask=attrs.NOTHING,
+    wm_mask=attrs.NOTHING,
 ):
     """
     Initialize the workflow that actually computes the IQMs.
@@ -547,12 +588,33 @@ def compute_iqms(
             "spikes_mask",
             "wm_mask",
         ],
+        in_file=in_file,
+        in_bvec=in_bvec,
+        in_bvec_diff=in_bvec_diff,
+        b_values_shells=b_values_shells,
+        in_b0=in_b0,
+        n_shells=n_shells,
+        in_md=in_md,
+        b_values_file=b_values_file,
+        in_noise=in_noise,
+        in_shells=in_shells,
+        qspace_neighbors=qspace_neighbors,
+        in_fa_nans=in_fa_nans,
+        wm_mask=wm_mask,
+        in_fa_degenerate=in_fa_degenerate,
+        in_bvec_rotated=in_bvec_rotated,
+        brain_mask=brain_mask,
+        framewise_displacement=framewise_displacement,
+        cc_mask=cc_mask,
+        in_fa=in_fa,
+        spikes_mask=spikes_mask,
+        piesno_sigma=piesno_sigma,
+        in_cfa=in_cfa,
     )
 
-    # niu function needs re-definition
     workflow.add(
-        niu.Function(
-            function=_estimate_sigma,
+        FunctionTask(
+            func=_estimate_sigma,
             in_noise=workflow.lzin.in_noise,
             brain_mask=workflow.lzin.brain_mask,
             name="estimate_sigma",

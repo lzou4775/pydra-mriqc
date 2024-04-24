@@ -4,7 +4,8 @@ import logging
 import numpy as np
 from pathlib import Path
 from pydra.engine import Workflow
-from pydra.engine.specs import MultiInputObj
+from pydra.engine.specs import MultiInputObj, BaseSpec, SpecInfo
+from pydra.engine.task import FunctionTask
 import pydra.mark
 from .cc_segmentation import CCSegmentation
 from .correct_signal_drift import CorrectSignalDrift
@@ -20,12 +21,10 @@ from .spiking_voxels_mask import SpikingVoxelsMask
 from .split_shells import SplitShells
 from .weighted_stat import WeightedStat
 import scipy.ndimage as nd
+import typing as ty
 
 
 logger = logging.getLogger(__name__)
-
-
-
 
 
 def _exp_func(t, A, K, C):
@@ -174,7 +173,9 @@ def get_spike_mask(
     return spike_mask
 
 
-def noise_piesno(data: np.ndarray, n_channels: int = 4) -> (np.ndarray, np.ndarray):
+def noise_piesno(
+    data: np.ndarray, n_channels: int = 4
+) -> ty.Tuple[np.ndarray, np.ndarray]:
     """
     Estimates noise in raw diffusion MRI (dMRI) data using the PIESNO algorithm.
 
